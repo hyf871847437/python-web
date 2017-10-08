@@ -3,7 +3,7 @@ from django.core.urlresolvers import resolve
 from django.template.loader import render_to_string
 from django.http import HttpRequest
 from lists.views import home_page
-from lists.models import Item
+from lists.models import Item,List
 
 class HomePageTest(TestCase):
     def test_root_url_resolves_to_home_page_view(self):
@@ -11,53 +11,62 @@ class HomePageTest(TestCase):
         self.assertEqual(found.func,home_page)
         print('right')
 
-    def test_home_page_is_right(self):
-        request = HttpRequest()
-        response = home_page(request)
-        self.assertTrue(response.content.startswith(b'<html'),response.content)
-        self.assertIn(b'<title>To-Do lists</title>',response.content)
-        self.assertTrue(response.content.endswith(b'</html>'))
-
     def _test_home_page_return_correct_html(self):   #{% csrf_token %} 导致测试失败
         request = HttpRequest()
         response = home_page(request)
         expected_html = render_to_string('home.html')
         self.assertEqual(response.content.decode(),expected_html)
 
-    def test_home_page_can_save_a_POST_request(self):
-        request = HttpRequest()
-        request.method = 'POST'
-        request.POST['item_text'] = 'The first item'
 
-        response = home_page(request)
+class ListViewTest(TestCase):
+    def test_user_list_template(self):
+        list_ = List.objects.create()
+        response = self.client.get('/lists/%d/'%(list_.id,))
+        self.assertTemplateUsed(response,'list.html')
 
-        self.assertEqual(Item.objects.count(),1)
-        first_item = Item.objects.first()
-        self.assertEqual(first_item.text,'The first item')
+    def test_displays_only_items_for_that_list(self):
+        correct_list = List.objects.create()
+        Item.objects.create(text='itemy 1',list=correct_list)
+        Item.objects.create(text='itemy 2',list=correct_list)
+        other_list = List.objects.create()
 
-    def test_home_page_displays_all_list_items(self):
-        Item.objects.create(text='itemy 1')
-        Item.objects.create(text='itemy 2')
+        Item.objects.create(text='other itemy 1', list=other_list)
+        Item.objects.create(text='other itemy 2', list=other_list)
 
-        request = HttpRequest()
-        response = home_page(request)
-        self.assertIn('itemy 1',response.content.decode())
-        self.assertIn('itemy 2', response.content.decode())
+        response = self.client.get('/lists/%d/' % (correct_list.id,))
+
+        self.assertContains(response, 'itemy 1')
+        self.assertContains(response, 'itemy 2')
+
+        self.assertNotContains(response,'other itemy 1')
+        self.assertNotContains(response, 'other itemy 2')
+
+    def test_paases_correct_list_to_template(self):
+        other_list = List.objects.create()
+        correct_list = List.objects.create()
+
+        response = self.client.post('/lists/%d/' % (correct_list.id,))
+        self.assertEqual(response.context['list'],correct_list)
 
 
-        #expect_html = render_to_string('home.html',{'new_item_text':'A new list item'})
-        #self.assertEqual(response.content.decode(),expect_html)
-
-
-class ItemModelTest(TestCase):
+class ListAndModelsTest(TestCase):
     def test_saving_and_retrieving_items(self):
+        list_ = List()
+        list_.save()
+
+
         first_item = Item()
         first_item.text = 'The first list item'
+        first_item.list = list_
         first_item.save()
 
         second_item = Item()
         second_item.text = 'The second list item'
+        second_item.list = list_
         second_item.save()
+
+        save_list = List.objects.first()
+        self.assertEqual(save_list,list_)
 
         saved_items = Item.objects.all()
         self.assertEqual(saved_items.count(),2)
@@ -67,23 +76,40 @@ class ItemModelTest(TestCase):
 
         self.assertEqual(first_save_item.text,'The first list item')
         self.assertEqual(second_save_item.text, 'The second list item')
+        self.assertEqual(first_save_item.list,list_)
+        self.assertEqual(second_save_item.list,list_)
 
 
+class NewListTest(TestCase):
+    def test_home_page_can_save_a_POST_request(self):
+        self.client.post('/lists/new',data={'item_text':'The first list item'})
+
+        self.assertEqual(Item.objects.count(),1)
+        first_item = Item.objects.first()
+        self.assertEqual(first_item.text,'The first list item')
 
     def test_home_page_redirects_after_POST(self):
-        request = HttpRequest()
-        request.method = 'POST'
-        request.POST['item_text'] = 'The first item'
 
-        response = home_page(request)
+        response = self.client.post('/lists/new',data={'item_text':'The first list item'})
 
+        new_list = List.objects.first()
+        self.assertRedirects(response,'/lists/%d/'%(new_list.id,))
 
-        self.assertEqual(response.status_code, 302)
-        self.assertEqual(response['location'], '/')
-        # expect_html = render_to_string('home.html',{'new_item_text':'The first item'})
-        # self.assertEqual(response.content.decode(),expect_html)
+    def test_can_save_a_POST_request_to_an_existing_list(self):
+        other_list = List.objects.create()
+        correct_list = List.objects.create()
 
-    def test_home_page_only_save_items_when_necessary(self):
-        request = HttpRequest()
-        home_page(request)
-        self.assertEqual(Item.objects.count(),0)
+        self.client.post('/lists/%d/add_item'%(correct_list.id,),data={'item_text':'A new item for an existing list'})
+
+        self.assertEqual(Item.objects.count(),1)
+        new_item = Item.objects.first()
+        self.assertEqual(new_item.text,'A new item for an existing list')
+        self.assertEqual(new_item.list,correct_list)
+
+    def test_redirects_to_list_view(self):
+        other_list = List.objects.create()
+        correct_list = List.objects.create()
+
+        response = self.client.post('/lists/%d/add_item'%(correct_list.id,),data={'item_text':'A new item for an existing list'})
+
+        self.assertRedirects(response,'/lists/%d/'%(correct_list.id,))
