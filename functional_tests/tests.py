@@ -1,15 +1,16 @@
 from selenium import webdriver
 from selenium.webdriver.common.keys import Keys
 import unittest,time
-from django.test import LiveServerTestCase
+from django.contrib.staticfiles.testing import StaticLiveServerTestCase
 
-class NewVisitorTest(LiveServerTestCase):
+class NewVisitorTest(StaticLiveServerTestCase):
     #setup 和tearDowm是特殊的方法，分别在测试的前后运行，这两个方法与try/except相似
     def setUp(self):
         self.browser = webdriver.Chrome()
         self.browser.implicitly_wait(3)                          #隐式等待 3秒
 
     def tearDown(self):
+        self.browser.refresh()
         self.browser.quit()
 
     def check_for_row_in_item(self,row_text):
@@ -70,3 +71,20 @@ class NewVisitorTest(LiveServerTestCase):
 
 
         self.fail('Finish the test!')
+
+    def test_layout_and_styling(self):
+        #首页
+        self.browser.get(self.live_server_url)
+        self.browser.set_window_size(1024,768)
+        #显示居中
+        inputbox = self.browser.find_element_by_id('id_new_item')
+        self.assertAlmostEqual(inputbox.location['x'] + inputbox.size['width'] / 2,
+                               512,
+                               delta=10)
+        #新建清单也居中
+        inputbox.send_keys('testing\n')
+        inputbox = self.browser.find_element_by_id('id_new_item')
+        self.assertAlmostEqual(inputbox.location['x'] + inputbox.size['width'] / 2,
+                               512,
+                               delta=10)
+
